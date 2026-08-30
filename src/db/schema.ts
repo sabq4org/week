@@ -128,3 +128,30 @@ export const subscribers = pgTable("subscribers", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   verifiedAt: timestamp("verified_at", { withTimezone: true }),
 }, (t) => [uniqueIndex("subscribers_email_idx").on(t.email)]);
+
+export const officialNews = pgTable("official_news", {
+  id: serial("id").primaryKey(),
+  sourceId: integer("source_id").notNull().references(() => sources.id),
+  title: text("title").notNull(),
+  summary: text("summary"),
+  url: text("url").notNull().unique(),
+  publishedAt: timestamp("published_at", { withTimezone: true }).notNull(),
+  fetchedAt: timestamp("fetched_at", { withTimezone: true }).notNull().defaultNow(),
+  kind: text("kind").notNull().default("news"),
+}, (t) => [index("official_news_published_idx").on(t.publishedAt)]);
+
+/** تقارير نقاط البيع الأسبوعية — التقرير وحدة واحدة (قطاعات + مدن) لا سلسلة. */
+export const posReports = pgTable("pos_reports", {
+  id: serial("id").primaryKey(),
+  weekStart: date("week_start").notNull(),
+  weekEnd: date("week_end").notNull().unique(),
+  labelAr: text("label_ar").notNull(),
+  totalValueThousands: numeric("total_value_thousands", { precision: 20, scale: 2 }).notNull(),
+  totalCountThousands: numeric("total_count_thousands", { precision: 20, scale: 2 }).notNull(),
+  weeklyValueChangePct: numeric("weekly_value_change_pct", { precision: 8, scale: 2 }).notNull(),
+  weeklyCountChangePct: numeric("weekly_count_change_pct", { precision: 8, scale: 2 }).notNull(),
+  activities: jsonb("activities").$type<{ en: string; ar: string; v: number; dv: number; isGroup?: boolean; group?: string }[]>().notNull(),
+  cities: jsonb("cities").$type<{ en: string; ar: string; v: number; dv: number }[]>().notNull(),
+  sourceUrl: text("source_url").notNull(),
+  fetchedAt: timestamp("fetched_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [index("pos_reports_week_idx").on(t.weekEnd)]);

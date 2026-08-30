@@ -5,7 +5,8 @@
 import { and, eq, desc } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { INDICATOR_DEFS, SAMA_INDICATOR_KEYS, fetchIndicatorSeries, fetchIndicatorSnapshots } from "@/lib/sama/indicators";
-import { FX_CODES, FX_NAMES_AR, fetchFxToday } from "@/lib/sama/fx";
+import { FX_CODES, FX_NAMES_AR, fetchFxHistory, fetchFxToday } from "@/lib/sama/fx";
+import { fetchSamaNews } from "@/lib/sama/news";
 
 const { sources, datasets, metrics, series, observations, ingestRuns } = schema;
 
@@ -98,16 +99,43 @@ export async function ingestSamaFx() {
         stripOrder: code === "EUR" ? 6 : null, direction: "neutral", expectedGapDays: 4,
       });
       const s = await ensureSeries(ds.id, metric.id, `fx.${code.toLowerCase()}`, { currency: code });
-      seen++; if (await upsertObservation(s.id, r.date, r.rate, r.nameAr, "op=exchangeRates")) fresh++;
-      if (r.prevRate && r.prevDate) { seen++; if (await upsertObservation(s.id, r.prevDate, r.prevRate, r.nameAr, "op=exchangeRates")) fresh++; }
+      seen++; if (await upsertObservation(s.id, r.date, r.rate, nameAr, "op=exchangeRates")) fresh++;
+      try {
+        // تعبئة تاريخية دفعية: آخر 120 يومًا، revision=1، والتعارض يُتجاهل (قيمة اليوم المتغيرة تمر عبر upsertObservation أعلاه)
+        const hist = (await fetchFxHistory(code)).slice(-120);
+        seen += hist.length;
+        if (hist.length) {
+          const inserted = await db.insert(observations).values(hist.map((h) => ({
+            seriesId: s.id, period: h.date, revision: 1, value: String(h.rate),
+            sourceLabel: nameAr, sourceRef: "op=exchangeHistoryByCode",
+          }))).onConflictDoNothing().returning({ p: observations.period });
+          fresh += inserted.length;
+        }
+      } catch { /* التاريخ اختياري؛ سعر اليوم كافٍ */ }
     }
     return { seen, fresh };
   });
 }
 
+export async function ingestSamaNews() {
+  const src = await ensureSource();
+  const ds = await ensureDataset(src.id, "sama.news", "بيانات البنك المركزي وأخباره", "SAMA official news", "daily");
+  return runWithLog(ds.id, async () => {
+    const items = await fetchSamaNews();
+    let fresh = 0;
+    for (const n of items) {
+      const r = await db.insert(schema.officialNews).values({
+        sourceId: src.id, title: n.title, summary: n.summary || null, url: n.url, publishedAt: new Date(n.publishedAt),
+      }).onConflictDoNothing().returning();
+      if (r.length) fresh++;
+    }
+    return { seen: items.length, fresh };
+  });
+}
+
 export async function ingestAll() {
   const results: Record<string, unknown> = {};
-  for (const [name, fn] of [["sama.indicators", ingestSamaIndicators], ["sama.fx", ingestSamaFx]] as const) {
+  for (const [name, fn] of [["sama.indicators", ingestSamaIndicators], ["sama.fx", ingestSamaFx], ["sama.news", ingestSamaNews]] as const) {
     try { results[name] = await fn(); } catch (e) { results[name] = { error: e instanceof Error ? e.message : String(e) }; }
   }
   return results;
