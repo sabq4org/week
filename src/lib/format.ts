@@ -30,3 +30,13 @@ export function fmtRelative(d: Date): string {
 export function daysBetween(isoA: string, b: Date): number {
   return Math.floor((b.getTime() - new Date(isoA + "T00:00:00Z").getTime()) / 86400000);
 }
+
+/** قيمة معروضة مختصرة: المبالغ الكبيرة بالمليار/المليون، والنِّسب والنقاط والأسعار كما هي. */
+export function fmtCompact(value: number, unit: string, code: string, valueText: string): { text: string; unit: string } {
+  if (code.startsWith("fx.")) return { text: valueText, unit: "ريال" };
+  if (unit === "%" || unit === "USD" || unit === "نقطة") return { text: valueText, unit: "" };
+  const abs = Math.abs(value);
+  if (abs >= 1e9) return { text: fmtNum(value / 1e9, 1), unit: "مليار ريال" };
+  if (abs >= 1e6) return { text: fmtNum(value / 1e6, 1), unit: "مليون ريال" };
+  return { text: fmtNum(value, 1), unit };
+}
